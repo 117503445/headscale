@@ -1,0 +1,13 @@
+services:
+  headscale-dev:
+    build:
+      context: ./
+      dockerfile: Dockerfile.dev
+    volumes:
+        - ./:/workspace
+        - headscale-dev-vsc:/root/.vscode-server
+    stdin_open: true
+    tty: true
+
+volumes:
+  headscale-dev-vsc:
