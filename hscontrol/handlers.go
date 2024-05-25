@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -51,6 +52,63 @@ func parseCabailityVersion(req *http.Request) (tailcfg.CapabilityVersion, error)
 	}
 
 	return tailcfg.CapabilityVersion(clientCapabilityVersion), nil
+}
+
+// TODO: What is the best file to put this function in?
+func (h *Headscale) VerifyHandler(
+	writer http.ResponseWriter,
+	req *http.Request,
+) {
+	if req.Method != http.MethodPost {
+		http.Error(writer, "Wrong method", http.StatusMethodNotAllowed)
+		return
+	}
+	log.Debug().
+		Str("handler", "/verify").
+		Msg("verify client")
+
+	body, _ := io.ReadAll(req.Body)
+	derpAdmitClientRequest := tailcfg.DERPAdmitClientRequest{}
+	if err := json.Unmarshal(body, &derpAdmitClientRequest); err != nil {
+		log.Error().
+			Caller().
+			Err(err).
+			Msg("Cannot parse derpAdmitClientRequest")
+		http.Error(writer, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	nodes, err := h.db.ListNodes()
+	if err != nil {
+		log.Error().
+			Caller().
+			Err(err).
+			Msg("Cannot list nodes")
+		http.Error(writer, "Internal error", http.StatusInternalServerError)
+	}
+
+	allow := false
+	// Check if the node is in the list of nodes
+	for _, node := range nodes {
+		if node.NodeKey == derpAdmitClientRequest.NodePublic {
+			allow = true
+			break
+		}
+	}
+
+	resp := tailcfg.DERPAdmitClientResponse{
+		Allow: allow,
+	}
+
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(http.StatusOK)
+	err = json.NewEncoder(writer).Encode(resp)
+	if err != nil {
+		log.Error().
+			Caller().
+			Err(err).
+			Msg("Failed to write response")
+	}
 }
 
 // KeyHandler provides the Headscale pub key
