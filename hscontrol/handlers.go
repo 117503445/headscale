@@ -68,7 +68,7 @@ func (h *Headscale) VerifyHandler(
 		Msg("verify client")
 
 	body, _ := io.ReadAll(req.Body)
-	derpAdmitClientRequest := tailcfg.DERPAdmitClientRequest{}
+	var derpAdmitClientRequest tailcfg.DERPAdmitClientRequest
 	if err := json.Unmarshal(body, &derpAdmitClientRequest); err != nil {
 		log.Error().
 			Caller().
