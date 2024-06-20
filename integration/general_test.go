@@ -1,21 +1,27 @@
 package integration
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"github.com/juanfont/headscale/hscontrol/types"
+	hderp "github.com/juanfont/headscale/integration/derp"
 	"github.com/juanfont/headscale/integration/hsic"
 	"github.com/juanfont/headscale/integration/tsic"
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/derp"
 	"tailscale.com/types/key"
 )
 
@@ -813,7 +819,7 @@ func TestNodeOnlineStatus(t *testing.T) {
 
 // TestPingAllByIPManyUpDown is a variant of the PingAll
 // test which will take the tailscale node up and down
-// five times ensuring they are able to restablish connectivity.
+// three times ensuring they are able to restablish connectivity.
 func TestPingAllByIPManyUpDown(t *testing.T) {
 	IntegrationSkip(t)
 	t.Parallel()
@@ -893,4 +899,117 @@ func TestPingAllByIPManyUpDown(t *testing.T) {
 		success := pingAllHelper(t, allClients, allAddrs)
 		t.Logf("%d successful pings out of %d", success, len(allClients)*len(allIps))
 	}
+}
+
+func TestDERPVerify(t *testing.T) {
+	IntegrationSkip(t)
+	t.Parallel()
+	scenario, err := NewScenario(dockertestMaxWait())
+	assertNoErr(t, err)
+	defer scenario.Shutdown()
+
+	spec := map[string]int{
+		"user1": 10,
+	}
+
+	err = scenario.CreateHeadscaleEnv(spec, []tsic.Option{}, hsic.WithTestName("derpverify"))
+	assertNoErrHeadscaleEnv(t, err)
+
+	allClients, err := scenario.ListTailscaleClients()
+	assertNoErrListClients(t, err)
+
+	t.Logf("All clients: %v", allClients)
+
+	serverPrivateKey := key.NewNode()
+	derpServer := derp.NewServer(serverPrivateKey, t.Logf)
+
+	t.Logf("len(server) = %d", scenario.controlServers.Size())
+
+	var controlServer ControlServer
+	scenario.controlServers.Range(
+		func(key string, value ControlServer) bool {
+			controlServer = value
+			return false
+		},
+	)
+	if controlServer == nil {
+		t.Fatalf("no control server found")
+	}
+
+	t.Logf("controlServer: %v", controlServer)
+
+	t.Logf("hostname: %s, ip: %s", controlServer.GetHostname(), controlServer.GetIP())
+
+	t.Logf("controlServer.GetEndpoint(): %s", controlServer.GetEndpoint())
+
+	// derpServer.SetVerifyClientURL(fmt.Sprintf("%s/verify", controlServer.GetEndpoint()))
+	defer derpServer.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	t.Logf("Connecting client ...")
+	cout, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cout.Close()
+
+	cin, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cin.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	brwServer := bufio.NewReadWriter(bufio.NewReader(cin), bufio.NewWriter(cin))
+	go derpServer.Accept(ctx, cin, brwServer, "[abc::def]")
+
+	brw := bufio.NewReadWriter(bufio.NewReader(cout), bufio.NewWriter(cout))
+
+	pk := key.NewNode()
+	derpClient, err := derp.NewClient(pk, cout, brw, t.Logf)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	// waitConnect
+	resp, err := derpClient.Recv()
+	if err != nil {
+		t.Fatalf("expected error, got nil")
+	}
+	t.Logf("resp: %v, %v", resp, reflect.TypeOf(resp))
+
+
+	nodes, err := controlServer.ListNodesInUser("user1")
+	if err != nil {
+		t.Fatalf("failed to list nodes in user1: %s", err)
+	}
+	if len(nodes) == 0 {
+		t.Fatalf("no nodes found")
+	}
+	nk := nodes[0].GetNodeKey()
+	pubKey := key.NodePublic{}
+	err = pubKey.UnmarshalText([]byte(nk))
+	if err != nil {
+		t.Fatalf("failed to unmarshal node key: %s", err)
+	}
+
+	t.Logf("pubKey: %s", pubKey.String())
+
+	hderpClient, err := hderp.NewClient(pk, cout, brw, t.Logf)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	// waitConnect
+	// _, err = hderpClient.Recv()
+	// if err == nil {
+	// 	t.Fatalf("expected error, got nil")
+	// }
+	t.Log(hderpClient)
+
 }
