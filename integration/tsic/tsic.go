@@ -171,6 +171,7 @@ func New(
 	network *dockertest.Network,
 	opts ...Option,
 ) (*TailscaleInContainer, error) {
+	fmt.Println("TailscaleInContainer New")
 	hash, err := util.GenerateRandomStringDNSSafe(tsicHashLength)
 	if err != nil {
 		return nil, err

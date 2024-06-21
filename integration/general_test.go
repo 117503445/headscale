@@ -1,21 +1,31 @@
 package integration
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"github.com/juanfont/headscale/hscontrol/types"
+	hderp "github.com/juanfont/headscale/integration/derp"
 	"github.com/juanfont/headscale/integration/hsic"
 	"github.com/juanfont/headscale/integration/tsic"
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/derp"
+	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
 
@@ -813,7 +823,7 @@ func TestNodeOnlineStatus(t *testing.T) {
 
 // TestPingAllByIPManyUpDown is a variant of the PingAll
 // test which will take the tailscale node up and down
-// five times ensuring they are able to restablish connectivity.
+// three times ensuring they are able to restablish connectivity.
 func TestPingAllByIPManyUpDown(t *testing.T) {
 	IntegrationSkip(t)
 	t.Parallel()
@@ -893,4 +903,76 @@ func TestPingAllByIPManyUpDown(t *testing.T) {
 		success := pingAllHelper(t, allClients, allAddrs)
 		t.Logf("%d successful pings out of %d", success, len(allClients)*len(allIps))
 	}
+}
+
+func TestDERPVerify(t *testing.T) {
+	IntegrationSkip(t)
+	t.Parallel()
+	scenario, err := NewScenario(dockertestMaxWait())
+	assertNoErr(t, err)
+	defer scenario.Shutdown()
+
+	spec := map[string]int{
+		"user1": 10,
+	}
+
+	err = scenario.CreateHeadscaleEnv(spec, []tsic.Option{}, hsic.WithTestName("derpverify"))
+	assertNoErrHeadscaleEnv(t, err)
+
+	allClients, err := scenario.ListTailscaleClients()
+	assertNoErrListClients(t, err)
+
+	t.Logf("All clients: %v", allClients)
+
+	t.Logf("len(server) = %d", scenario.controlServers.Size())
+
+	var controlServer ControlServer
+	scenario.controlServers.Range(
+		func(key string, value ControlServer) bool {
+			controlServer = value
+			return false
+		},
+	)
+	if controlServer == nil {
+		t.Fatalf("no control server found")
+	}
+
+	t.Logf("controlServer: %v", controlServer)
+
+	t.Logf("hostname: %s, ip: %s", controlServer.GetHostname(), controlServer.GetIP())
+
+	t.Logf("controlServer.GetEndpoint(): %s", controlServer.GetEndpoint())
+
+	// derpServer.SetVerifyClientURL()
+
+	// https://github.com/tailscale/tailscale/blob/964282d34f06ecc06ce644769c66b0b31d118340/derp/derp_server.go#L1159
+	ctx := context.Background()
+
+	//netip.Addr
+	source, err := netip.ParseAddr("127.0.0.1")
+	assertNoErr(t, err)
+
+	jreq, err := json.Marshal(&tailcfg.DERPAdmitClientRequest{
+		NodePublic: key.NewNode().Public(),
+		Source:     source,
+	})
+	assertNoErr(t, err)
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/verify", controlServer.GetEndpoint()), bytes.NewReader(jreq))
+	assertNoErr(t, err)
+	res, err := http.DefaultClient.Do(req)
+	assertNoErr(t, err)
+	defer res.Body.Close()
+
+	t.Log(res.StatusCode)
+	var jres tailcfg.DERPAdmitClientResponse
+	err = json.NewDecoder(io.LimitReader(res.Body, 4<<10)).Decode(&jres)
+	assertNoErr(t, err)
+
+	t.Log(jres.Allow)
+
+	nodes, err := controlServer.ListNodesInUser("user1")
+	assertNoErr(t, err)
+
+	t.Log(key.NewNode().Public())
+	t.Log(nodes[0].NodeKey)
 }

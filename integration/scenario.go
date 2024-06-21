@@ -307,6 +307,8 @@ func (s *Scenario) CreateTailscaleNodesInUser(
 	count int,
 	opts ...tsic.Option,
 ) error {
+	fmt.Println("CreateTailscaleNodesInUser")
+	fmt.Println("count", count)
 	if user, ok := s.users[userStr]; ok {
 		var versions []string
 		for i := 0; i < count; i++ {
