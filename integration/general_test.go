@@ -941,33 +941,34 @@ func TestDERPVerify(t *testing.T) {
 	// derpServer.SetVerifyClientURL()
 
 	// https://github.com/tailscale/tailscale/blob/964282d34f06ecc06ce644769c66b0b31d118340/derp/derp_server.go#L1159
-	ctx := context.Background()
 
-	//netip.Addr
-	source, err := netip.ParseAddr("127.0.0.1")
-	assertNoErr(t, err)
+	sendDerpVerifyRequest := func(t *testing.T, pub string) *tailcfg.DERPAdmitClientResponse {
+		jreq, err := json.Marshal(
+			map[string]interface{}{
+				"NodePublic": pub,
+				"Source":     "127.0.0.1", // not used
+			})
 
-	jreq, err := json.Marshal(&tailcfg.DERPAdmitClientRequest{
-		NodePublic: key.NewNode().Public(),
-		Source:     source,
-	})
-	assertNoErr(t, err)
-	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/verify", controlServer.GetEndpoint()), bytes.NewReader(jreq))
-	assertNoErr(t, err)
-	res, err := http.DefaultClient.Do(req)
-	assertNoErr(t, err)
-	defer res.Body.Close()
+		assertNoErr(t, err)
+		req, err := http.NewRequest("POST", fmt.Sprintf("%s/verify", controlServer.GetEndpoint()), bytes.NewReader(jreq))
+		assertNoErr(t, err)
+		res, err := http.DefaultClient.Do(req)
+		assertNoErr(t, err)
+		defer res.Body.Close()
 
-	t.Log(res.StatusCode)
-	var jres tailcfg.DERPAdmitClientResponse
-	err = json.NewDecoder(io.LimitReader(res.Body, 4<<10)).Decode(&jres)
-	assertNoErr(t, err)
+		var jres tailcfg.DERPAdmitClientResponse
+		err = json.NewDecoder(io.LimitReader(res.Body, 4<<10)).Decode(&jres)
+		assertNoErr(t, err)
+		t.Log(jres.Allow)
 
-	t.Log(jres.Allow)
+		return &jres
+	}
+
+	resp := sendDerpVerifyRequest(t, key.NewNode().Public().String())
+	assert.False(t, resp.Allow)
 
 	nodes, err := controlServer.ListNodesInUser("user1")
 	assertNoErr(t, err)
-
-	t.Log(key.NewNode().Public())
-	t.Log(nodes[0].NodeKey)
+	resp = sendDerpVerifyRequest(t, nodes[0].NodeKey)
+	assert.True(t, resp.Allow)
 }
