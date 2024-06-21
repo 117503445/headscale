@@ -913,13 +913,6 @@ func TestDERPVerify(t *testing.T) {
 	err = scenario.CreateHeadscaleEnv(spec, []tsic.Option{}, hsic.WithTestName("derpverify"))
 	assertNoErrHeadscaleEnv(t, err)
 
-	allClients, err := scenario.ListTailscaleClients()
-	assertNoErrListClients(t, err)
-
-	t.Logf("All clients: %v", allClients)
-
-	t.Logf("len(server) = %d", scenario.controlServers.Size())
-
 	var controlServer ControlServer
 	scenario.controlServers.Range(
 		func(key string, value ControlServer) bool {
@@ -931,16 +924,7 @@ func TestDERPVerify(t *testing.T) {
 		t.Fatalf("no control server found")
 	}
 
-	t.Logf("controlServer: %v", controlServer)
-
-	t.Logf("hostname: %s, ip: %s", controlServer.GetHostname(), controlServer.GetIP())
-
-	t.Logf("controlServer.GetEndpoint(): %s", controlServer.GetEndpoint())
-
-	// derpServer.SetVerifyClientURL()
-
 	// https://github.com/tailscale/tailscale/blob/964282d34f06ecc06ce644769c66b0b31d118340/derp/derp_server.go#L1159
-
 	sendDerpVerifyRequest := func(t *testing.T, pub string) *tailcfg.DERPAdmitClientResponse {
 		jreq, err := json.Marshal(
 			map[string]interface{}{
@@ -958,14 +942,14 @@ func TestDERPVerify(t *testing.T) {
 		var jres tailcfg.DERPAdmitClientResponse
 		err = json.NewDecoder(io.LimitReader(res.Body, 4<<10)).Decode(&jres)
 		assertNoErr(t, err)
-		t.Log(jres.Allow)
-
 		return &jres
 	}
 
+	// Test that the DERP server rejects a node that is not in the user's list.
 	resp := sendDerpVerifyRequest(t, key.NewNode().Public().String())
 	assert.False(t, resp.Allow)
 
+	// Test that the DERP server accepts a node that is in the user's list.
 	nodes, err := controlServer.ListNodesInUser("user1")
 	assertNoErr(t, err)
 	resp = sendDerpVerifyRequest(t, nodes[0].NodeKey)
