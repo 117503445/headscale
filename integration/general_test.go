@@ -1,30 +1,25 @@
 package integration
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"github.com/juanfont/headscale/hscontrol/types"
-	hderp "github.com/juanfont/headscale/integration/derp"
 	"github.com/juanfont/headscale/integration/hsic"
 	"github.com/juanfont/headscale/integration/tsic"
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"tailscale.com/client/tailscale/apitype"
-	"tailscale.com/derp"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
